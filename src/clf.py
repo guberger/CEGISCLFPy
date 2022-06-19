@@ -12,21 +12,6 @@ class ExprTerm:
         self.V = expr_V
         self.DVF = expr_DVF
         self.DVGs = expr_DVGs
-
-class ValTerm:
-    def __init__(self, val_V, val_DVF, val_DVGs) -> None:
-        self.V = val_V
-        self.DVF = val_DVF
-        self.DVGs = val_DVGs
-
-def _make_valterm(syms, exprterm, states):
-    val_V = evalf_expr(exprterm.V, syms, states)
-    val_DVF = evalf_expr(exprterm.DVF, syms, states)
-    val_DVGs = [
-        evalf_expr(expr_DVG, syms, states) for expr_DVG in exprterm.DVGs
-    ]
-    return ValTerm(val_V, val_DVF, val_DVGs)
-
 ## Generator
 
 class WitnessPos:
@@ -123,33 +108,37 @@ class VerifierError(Exception):
 
 class Verifier:
     def __init__(
-            self, syms, lbs, ubs, exprterms, ninp, tol_pos, tol_lie
+            self, syms, lbs_out, ubs_out, lbs_in, ubs_in,
+            exprterms, ninp, tol_pos, tol_lie
         ) -> None:
-        assert len(syms) == len(lbs) == len(ubs)
+        assert len(syms) == \
+            len(lbs_out) == len(ubs_out) == \
+            len(lbs_in) == len(ubs_in)
         self.spsyms = syms
-        self.lbs = lbs
-        self.ubs = ubs
+        self.lbs_out = lbs_out
+        self.ubs_out = ubs_out
+        self.lbs_in = lbs_in
+        self.ubs_in = ubs_in
         self.exprterms = exprterms
         self.ninp = ninp
         self.tol_pos = tol_pos
         self.tol_lie = tol_lie
 
-    def _check_pos_single(self, expr_V, ifix, lufix):
+    def _check_pos_single(self, expr_V, kfix, lufix):
         ctx = z3.Context()
         solver = z3.Solver(ctx=ctx)
         z3syms, syms_map = \
             create_z3syms_from_spsyms(ctx, self.spsyms)
-        # z3r = [z3.Real(f'r{i}', ctx=ctx) for i in range(self.ninp)]
 
-        for i in range(len(z3syms)):
-            if i != ifix:
-                solver.add(z3syms[i] >= self.lbs[i])
-                solver.add(z3syms[i] <= self.ubs[i])
-            elif i == ifix:
+        for k in range(len(z3syms)):
+            if k != kfix:
+                solver.add(z3syms[k] >= self.lbs_out[k])
+                solver.add(z3syms[k] <= self.ubs_out[k])
+            elif k == kfix:
                 if lufix == -1:
-                    solver.add(z3syms[i] == self.lbs[i])
+                    solver.add(z3syms[k] == self.lbs_out[k])
                 elif lufix == 1:
-                    solver.add(z3syms[i] == self.ubs[i])
+                    solver.add(z3syms[k] == self.ubs_out[k])
                 else:
                     raise VerifierError(
                         'Unknow lufix = %s.' % lufix
@@ -169,11 +158,69 @@ class Verifier:
             return True, np.zeros(len(self.spsyms))
 
     def check_pos(self, coeffs):
-        exprs_term = np.array([exprterm.V for exprterm in self.exprterms])
-        expr_V = np.dot(coeffs, exprs_term)
-        for ifix in range(len(self.spsyms)):
+        exprterms_V = np.array([exprterm.V for exprterm in self.exprterms])
+        expr_V = np.dot(coeffs, exprterms_V)
+        for kfix in range(len(self.spsyms)):
             for lufix in (-1, 1):
-                res, vars = self._check_pos_single(expr_V, ifix, lufix)
+                res, vars = self._check_pos_single(expr_V, kfix, lufix)
+                if not res:
+                    return False, vars
+        return True, np.zeros(len(self.spsyms))
+
+    def _check_lie_single(self, expr_DVF, expr_DVGs, kfix, lufix):
+        ctx = z3.Context()
+        solver = z3.Solver(ctx=ctx)
+        z3syms, syms_map = \
+            create_z3syms_from_spsyms(ctx, self.spsyms)
+        z3r = [z3.Real(f'r{i}', ctx=ctx) for i in range(self.ninp)]
+
+        for k in range(len(z3syms)):
+            if k != kfix:
+                solver.add(z3syms[k] >= self.lbs_out[k])
+                solver.add(z3syms[k] <= self.ubs_out[k])
+            elif k == kfix:
+                if lufix == -1:
+                    solver.add(z3syms[k] >= self.lbs_out[k])
+                    solver.add(z3syms[k] <= self.lbs_in[k])
+                elif lufix == 1:
+                    solver.add(z3syms[k] >= self.ubs_in[k])
+                    solver.add(z3syms[k] <= self.ubs_out[k])
+                else:
+                    raise VerifierError(
+                        'Unknow lufix = %s.' % lufix
+                    )
+
+        z3expr_DV = convert_spexpr_to_z3expr(syms_map, expr_DVF)
+        for i in range(self.ninp):
+            z3expr_r = convert_spexpr_to_z3expr(syms_map, expr_DVGs[i])
+            solver.add(z3r[i] + z3expr_r >= 0)
+            solver.add(z3r[i] - z3expr_r >= 0)
+            z3expr_DV = z3expr_DV - z3r[i]
+        solver.add(z3expr_DV >= self.tol_lie)
+
+        res = solver.check()
+
+        if res == z3.sat:
+            model = solver.model()
+            vars_ = get_vars_from_z3model(syms_map, model)
+            vars = np.array([vars_[sym.name] for sym in self.spsyms])
+            return False, vars
+        else:
+            return True, np.zeros(len(self.spsyms))
+
+    def check_lie(self, coeffs):
+        exprs_DVF = np.array([exprterm.DVF for exprterm in self.exprterms])
+        expr_DVF = np.dot(coeffs, exprs_DVF)
+        exprs_DVGs = [
+            np.array([exprterm.DVGs[i] for exprterm in self.exprterms])
+            for i in range(self.ninp)
+        ]
+        expr_DVGs = [np.dot(coeffs, exprs_DVG) for exprs_DVG in exprs_DVGs]
+        for kfix in range(len(self.spsyms)):
+            for lufix in (-1, 1):
+                res, vars = self._check_lie_single(
+                    expr_DVF, expr_DVGs, kfix, lufix
+                )
                 if not res:
                     return False, vars
         return True, np.zeros(len(self.spsyms))

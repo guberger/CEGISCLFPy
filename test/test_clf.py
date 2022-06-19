@@ -4,6 +4,13 @@ import numpy as np
 import sympy as sp
 from src.clf import ExprTerm, Generator, Verifier
 
+"""
+F = [0.5 1; 0 0.5]
+G1 = [1 0; 0 0]
+G2 = [0 0; 0 1]
+V = a1*x^2 + a2*y^2
+"""
+
 class TestGenerator(unittest.TestCase):
     def __init__(self, methodName: str = ...) -> None:
         super().__init__(methodName)
@@ -39,17 +46,22 @@ class TestVerifier(unittest.TestCase):
     def __init__(self, methodName: str = ...) -> None:
         super().__init__(methodName)
         x, y = syms = np.array(sp.symbols('x y'))
-        lbs = np.array([-1, -1])
-        ubs = np.array([1, 1])
+        lbs_out = np.array([-1, -1])
+        ubs_out = np.array([1, 1])
+        lbs_in = np.array([-0.1, -0.1])
+        ubs_in = np.array([0.1, 0.1])
         exprterms = [
             ExprTerm(x**2, 2*x*(x/2 + y), [2*x*x, 0*y]),
             ExprTerm(y**2, 2*y*y/2, [0*x, 2*y*y])
         ]
         ninp = 2
         tol_pos = 0.1
-        tol_lie = 0.1
+        tol_lie = 0.0
 
-        self.verif = Verifier(syms, lbs, ubs, exprterms, ninp, tol_pos, tol_lie)
+        self.verif = Verifier(
+            syms, lbs_out, ubs_out, lbs_in, ubs_in,
+            exprterms, ninp, tol_pos, tol_lie
+        )
 
     def test_check_pos(self):
         coeffs = np.array([1, 0.1])
@@ -59,3 +71,18 @@ class TestVerifier(unittest.TestCase):
         coeffs = np.array([1, 0.1 + 1e5])
         res, vars = self.verif.check_pos(coeffs)
         self.assertTrue(res)
+        self.assertAlmostEqual(abs(vars[0]) + abs(vars[1]), 0)
+
+    def test_check_lie(self):
+        coeffs = np.array([0.5, 1])
+        res, vars = self.verif.check_lie(coeffs)
+        self.assertTrue(res)
+        self.assertAlmostEqual(abs(vars[0]) + abs(vars[1]), 0)
+        coeffs = np.array([1, 1])
+        res, vars = self.verif.check_lie(coeffs)
+        self.assertFalse(res)
+        self.assertGreaterEqual(abs(vars[0]) + abs(vars[1]), 0.1)
+        self.assertGreaterEqual(vars[0], -1)
+        self.assertGreaterEqual(vars[1], -1)
+        self.assertLessEqual(vars[0], 1)
+        self.assertLessEqual(vars[1], 1)
