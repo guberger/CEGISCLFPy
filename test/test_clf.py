@@ -2,8 +2,6 @@ from math import cos, pi, sin
 import unittest
 import numpy as np
 import sympy as sp
-import gurobipy
-from src.symbolics import evalf_expr
 from src.clf import ExprTerm, Generator, Verifier
 
 class TestGenerator(unittest.TestCase):
@@ -19,10 +17,15 @@ class TestGenerator(unittest.TestCase):
         gen = Generator(syms, exprterms, ninp, epsilon)
         gen.rmax = 100
 
-        nwit = 1000
-        for a in np.linspace(0, 2*pi, nwit):
+        nwit_pos = 10
+        for a in np.linspace(0, 2*pi, nwit_pos):
             states = np.array([cos(a), sin(a)])
-            gen.add_witness(states)
+            gen.add_witness_pos(states)
+
+        nwit_lie = 1000
+        for a in np.linspace(0, 2*pi, nwit_lie):
+            states = np.array([cos(a), sin(a)])
+            gen.add_witness_lie(states)
 
         self.gen = gen
 
@@ -48,14 +51,11 @@ class TestVerifier(unittest.TestCase):
 
         self.verif = Verifier(syms, lbs, ubs, exprterms, ninp, tol_pos, tol_lie)
 
-    def test_check(self):
-        coeffs = np.array([1, 0.10000000001])
+    def test_check_pos(self):
+        coeffs = np.array([1, 0.1])
         res, vars = self.verif.check_pos(coeffs)
-        print(res)
-        print(vars)
-        # self.assertFalse(self.res1)
-        # val_expr1 = evalf_expr(self.expr1, self.syms, self.vars1)
-        # self.assertTrue(self.p.contains(self.vars2))
-        # self.assertLessEqual(round(val_expr1, 1), 0)
-        # self.assertTrue(self.res2)
-        pass
+        self.assertFalse(res)
+        self.assertAlmostEqual(abs(vars[1]), 1)
+        coeffs = np.array([1, 0.1 + 1e5])
+        res, vars = self.verif.check_pos(coeffs)
+        self.assertTrue(res)

@@ -29,10 +29,16 @@ def _make_valterm(syms, exprterm, states):
 
 ## Generator
 
-class Witness:
-    def __init__(self, nsates, valterms) -> None:
+class WitnessPos:
+    def __init__(self, nsates, valterms_V) -> None:
         self.nstates = nsates
-        self.valterms = valterms
+        self.valterms_V = valterms_V
+
+class WitnessLie:
+    def __init__(self, nsates, valterms_DVF, valterms_DVGs) -> None:
+        self.nstates = nsates
+        self.valterms_DVF = valterms_DVF
+        self.valterms_DVGs = valterms_DVGs
 
 class GeneratorError(Exception):
     def __init__(self, *args: object) -> None:
@@ -47,14 +53,30 @@ class Generator:
         self.ninp = ninp
         self.epsilon = epsilon
         self.rmax = 2
-        self.witnesses = []
+        self.witnesses_pos = []
+        self.witnesses_lie = []
 
-    def add_witness(self, states):
-        valterms = [
-            _make_valterm(self.syms, exprterm, states)
+    def add_witness_pos(self, states):
+        valterms_V = [
+            evalf_expr(exprterm.V, self.syms, states)
             for exprterm in self.exprterms
         ]
-        self.witnesses.append(Witness(np.linalg.norm(states), valterms))
+        self.witnesses_pos.append(WitnessPos(
+            np.linalg.norm(states), valterms_V
+        ))
+    
+    def add_witness_lie(self, states):
+        valterms_DVF = [
+            evalf_expr(exprterm.DVF, self.syms, states)
+            for exprterm in self.exprterms
+        ]
+        valterms_DVGs = [[
+            evalf_expr(expr_DVG, self.syms, states)
+            for expr_DVG in exprterm.DVGs
+        ] for exprterm in self.exprterms]
+        self.witnesses_lie.append(WitnessLie(
+            np.linalg.norm(states), valterms_DVF, valterms_DVGs
+        ))
 
     def compute_coeffs(self, *, output_flag=True):
         model = gurobipy.Model('Robust coeffs')
@@ -63,17 +85,22 @@ class Generator:
         coeffs = np.array(coeffs_.values())
         r = model.addVar(lb=-float('inf'), ub=self.rmax, name='r')
 
-        for wit in self.witnesses:
-            a = np.array([valterm.V for valterm in wit.valterms])
+        for wit in self.witnesses_pos:
+            a = np.array([valterm_V for valterm_V in wit.valterms_V])
             nstates = wit.nstates
             model.addConstr(np.dot(a, coeffs) >= nstates*self.epsilon)
+
+        for wit in self.witnesses_lie:
+            nstates = wit.nstates
             con = model.addVars(self.ninp)
             for i in range(self.ninp):
-                a = np.array([valterm.DVGs[i] for valterm in wit.valterms])
+                a = np.array([
+                    valterm_DVGs[i] for valterm_DVGs in wit.valterms_DVGs
+                ])
                 z_ = model.addVar()
                 model.addConstr(z_ == np.dot(a, coeffs))
                 model.addConstr(con[i] == abs_(z_))
-            a = np.array([valterm.DVF for valterm in wit.valterms])
+            a = np.array([valterm_DVF for valterm_DVF in wit.valterms_DVF])
             model.addConstr(np.dot(a, coeffs) - con.sum() + nstates*r <= 0)
 
         model.setObjective(r, GRB.MAXIMIZE)
@@ -125,7 +152,7 @@ class Verifier:
                     solver.add(z3syms[i] == self.ubs[i])
                 else:
                     raise VerifierError(
-                        'Unknow lufix = %s.' % str(lufix)
+                        'Unknow lufix = %s.' % lufix
                     )
 
         z3expr = convert_spexpr_to_z3expr(syms_map, expr_V)
