@@ -2,7 +2,7 @@ from math import cos, pi, sin
 import unittest
 import numpy as np
 import sympy as sp
-from src.clf import ExprTerm, Generator, Verifier
+from src.clf import SysTerm, SysTemplate, Domain, Generator, Verifier
 
 """
 F = [0.5 1; 0 0.5]
@@ -15,13 +15,12 @@ class TestGenerator(unittest.TestCase):
     def __init__(self, methodName: str = ...) -> None:
         super().__init__(methodName)
         x, y = syms = sp.symbols('x y')
-        exprterms = [
-            ExprTerm(x**2, 2*x*(x/2 + y), [2*x*x, 0*y]),
-            ExprTerm(y**2, 2*y*y/2, [0*x, 2*y*y])
-        ]
-        ninp = 2
+        systemp = SysTemplate([
+            SysTerm(x**2, 2*x*(x/2 + y), [2*x*x, 0*y]),
+            SysTerm(y**2, 2*y*y/2, [0*x, 2*y*y])
+        ])
         epsilon = 1e-3
-        gen = Generator(syms, exprterms, ninp, epsilon)
+        gen = Generator(syms, systemp, epsilon)
         gen.rmax = 100
 
         nwit_pos = 10
@@ -46,22 +45,20 @@ class TestVerifier(unittest.TestCase):
     def __init__(self, methodName: str = ...) -> None:
         super().__init__(methodName)
         x, y = syms = np.array(sp.symbols('x y'))
-        lbs_out = np.array([-1, -1])
-        ubs_out = np.array([1, 1])
-        lbs_in = np.array([-0.1, -0.1])
-        ubs_in = np.array([0.1, 0.1])
-        exprterms = [
-            ExprTerm(x**2, 2*x*(x/2 + y), [2*x*x, 0*y]),
-            ExprTerm(y**2, 2*y*y/2, [0*x, 2*y*y])
-        ]
-        ninp = 2
+        domain = Domain(
+            lbs_out=np.array([-1, -1]),
+            ubs_out=np.array([1, 1]),
+            lbs_in=np.array([-0.1, -0.1]),
+            ubs_in=np.array([0.1, 0.1])
+        )
+        systemp = SysTemplate([
+            SysTerm(x**2, 2*x*(x/2 + y), [2*x*x, 0*y]),
+            SysTerm(y**2, 2*y*y/2, [0*x, 2*y*y])
+        ])
         tol_pos = 0.1
         tol_lie = 0.0
 
-        self.verif = Verifier(
-            syms, lbs_out, ubs_out, lbs_in, ubs_in,
-            exprterms, ninp, tol_pos, tol_lie
-        )
+        self.verif = Verifier(syms, domain, systemp, tol_pos, tol_lie)
 
     def test_check_pos(self):
         coeffs = np.array([1, 0.1])
