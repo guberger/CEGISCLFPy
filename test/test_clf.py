@@ -117,50 +117,43 @@ class TestLearner(unittest.TestCase):
 
         lear.learn_CLF()
 
-    # def test_medium(self):
-    #     x1, x2, x3, x4 = syms_state = np.array(sp.symbols('x1 x2 x3 x4'))
-    #     exprs_term = [
-    #         x1, x2, x3, x4,
-    #         x1**2, x1*x2, x1*x3, x1*x4,
-    #         x2**2, x2*x3, x2*x4,
-    #         x3**2, x3*x4,
-    #         x4**2
-    #     ]
-    #     u1, u2 = syms_input = np.array(sp.symbols('u1 u2'))
+    def test_medium(self):
+        x1, x2, x3, x4 = syms = np.array(sp.symbols('x1 x2 x3 x4'))
+        sys = System(
+            expr_F=np.array([-x1, -x2, -x3, 2*x1/pi]),
+            expr_Gs=[
+                np.array([
+                    sp.sympify(0), sp.sympify(0), sp.sympify(0), sp.sympify(2)
+                ]),
+                np.array([
+                    -x1/100, sp.sympify(0), sp.sympify(0), sp.sympify(0)
+                ])
+            ]
+        )
+        temp = Template([
+            x1*x2, x1*x3, x1*x4, x2*x3, x3*x4,
+            x1**2, x2**2, x3**2, x4**2]) # works not with one extra xi*xj...
+        domain = Domain(
+            lbs_out=np.array([-pi/2, -1, -1, -1]),
+            ubs_out=np.array([pi/2, 1, 1, 1]),
+            lbs_in=np.array([-0.1, -0.1, -0.1, -0.1]),
+            ubs_in=np.array([0.1, 0.1, 0.1, 0.1])
+        )
+        epsilon = None
+        tol_rad = 1e-5
+        tol_pos = 1e-4
+        tol_lie = -0.001
 
-    #     exprs_field = np.array([-u1*x1, -x2, -x3, 2*x1/pi + u2])
-    #     dom_state = Polyhedron(4)
-    #     dom_state.add_halfspace(Halfspace(np.array([-1, 0, 0, 0]), -pi/2))
-    #     dom_state.add_halfspace(Halfspace(np.array([+1, 0, 0, 0]), -pi/2))
-    #     dom_state.add_halfspace(Halfspace(np.array([0, -1, 0, 0]), -1))
-    #     dom_state.add_halfspace(Halfspace(np.array([0, +1, 0, 0]), -1))
-    #     dom_state.add_halfspace(Halfspace(np.array([0, 0, -1, 0]), -1))
-    #     dom_state.add_halfspace(Halfspace(np.array([0, 0, +1, 0]), -1))
-    #     dom_state.add_halfspace(Halfspace(np.array([0, 0, 0, -1]), -1))
-    #     dom_state.add_halfspace(Halfspace(np.array([0, 0, 0, +1]), -1))
-    #     dom_input = Polyhedron(2)
-    #     dom_input.add_halfspace(Halfspace(np.array([-1, 0]), +0.9))
-    #     dom_input.add_halfspace(Halfspace(np.array([+1, 0]), -1.1))
-    #     dom_input.add_halfspace(Halfspace(np.array([0, -1]), -2))
-    #     dom_input.add_halfspace(Halfspace(np.array([0, +1]), -2))
-    #     system = System(
-    #         syms_state, syms_input, exprs_field, dom_state, dom_input
-    #     )
+        lear = Learner(
+            syms, sys, temp, domain, epsilon, tol_rad, tol_pos, tol_lie
+        )
 
-    #     lear = Learner(system, exprs_term)
-    #     lear.iter_max = 10
+        coeffs = np.array([0.01, 0.01, 0.01, 0.01, 0.01, 1, 1, 1, 0])
+        verif = Verifier(
+            lear.syms, lear.domain, lear.systemp, lear.tol_pos, lear.tol_lie
+        )
+        res, states = verif.check_lie(coeffs)
+        print(res)
+        print(states)
 
-    #     exprs_uopt = np.array([1, -2*x1/pi - x4])
-    #     demo_func = lambda states : \
-    #         np.array([
-    #             evalf_expr(expr_uopt, syms_state, states)
-    #             for expr_uopt in exprs_uopt
-    #         ])
-
-    #     rmin = 0.1
-
-    #     self.assertRaises(
-    #         LearnerError,
-    #         lear.learn_CLF,
-    #         rmin, demo_func, 1e-2,
-    #     )
+        lear.learn_CLF()
