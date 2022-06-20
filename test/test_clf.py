@@ -2,12 +2,14 @@ from math import cos, pi, sin
 import unittest
 import numpy as np
 import sympy as sp
-from src.clf import SysTerm, SysTemplate, Domain, Generator, Verifier
+from src.clf import \
+    SysTerm, SysTemplate, Domain, Generator, Verifier, \
+    System, Template, Learner, LearnerError
 
 """
-F = [0.5 1; 0 0.5]
-G1 = [1 0; 0 0]
-G2 = [0 0; 0 1]
+F = [0.5 1; 0 0.5] : [x/2 + y, y/2]
+G1 = [-1 0; 0 0] : [-x, 0]
+G2 = [0 0; 0 1] : [0, y]
 V = a1*x^2 + a2*y^2
 """
 
@@ -16,8 +18,8 @@ class TestGenerator(unittest.TestCase):
         super().__init__(methodName)
         x, y = syms = sp.symbols('x y')
         systemp = SysTemplate([
-            SysTerm(x**2, 2*x*(x/2 + y), [2*x*x, 0*y]),
-            SysTerm(y**2, 2*y*y/2, [0*x, 2*y*y])
+            SysTerm(x**2, 2*x*(x/2 + y), [2*x*x, sp.sympify(0)]),
+            SysTerm(y**2, 2*y*y/2, [sp.sympify(0), 2*y*y])
         ])
         epsilon = 1e-3
         gen = Generator(syms, systemp, epsilon)
@@ -52,7 +54,7 @@ class TestVerifier(unittest.TestCase):
             ubs_in=np.array([0.1, 0.1])
         )
         systemp = SysTemplate([
-            SysTerm(x**2, 2*x*(x/2 + y), [2*x*x, 0*y]),
+            SysTerm(x**2, 2*x*(x/2 + y), [-2*x*x, 0*y]),
             SysTerm(y**2, 2*y*y/2, [0*x, 2*y*y])
         ])
         tol_pos = 0.1
@@ -83,3 +85,82 @@ class TestVerifier(unittest.TestCase):
         self.assertGreaterEqual(vars[1], -1)
         self.assertLessEqual(vars[0], 1)
         self.assertLessEqual(vars[1], 1)
+
+class TestLearner(unittest.TestCase):
+    def __init__(self, methodName: str = ...) -> None:
+        super().__init__(methodName)
+
+    def test_small(self):
+        x, y = syms = np.array(sp.symbols('x y'))
+        sys = System(
+            expr_F=np.array([-x, 2*x/pi]),
+            expr_Gs=[
+                np.array([-x/10, sp.sympify(0)]),
+                np.array([sp.sympify(0), sp.sympify(2)])
+            ]
+        )
+        temp = Template([x, y, x**2, x*y, y**2])
+        domain = Domain(
+            lbs_out=np.array([-pi/2, -1]),
+            ubs_out=np.array([pi/2, 1]),
+            lbs_in=np.array([-0.1, -0.1]),
+            ubs_in=np.array([0.1, 0.1])
+        )
+        epsilon = None
+        tol_rad = 1e-5
+        tol_pos = 1e-4
+        tol_lie = -0.001
+
+        lear = Learner(
+            syms, sys, temp, domain, epsilon, tol_rad, tol_pos, tol_lie
+        )
+
+        lear.learn_CLF()
+
+    # def test_medium(self):
+    #     x1, x2, x3, x4 = syms_state = np.array(sp.symbols('x1 x2 x3 x4'))
+    #     exprs_term = [
+    #         x1, x2, x3, x4,
+    #         x1**2, x1*x2, x1*x3, x1*x4,
+    #         x2**2, x2*x3, x2*x4,
+    #         x3**2, x3*x4,
+    #         x4**2
+    #     ]
+    #     u1, u2 = syms_input = np.array(sp.symbols('u1 u2'))
+
+    #     exprs_field = np.array([-u1*x1, -x2, -x3, 2*x1/pi + u2])
+    #     dom_state = Polyhedron(4)
+    #     dom_state.add_halfspace(Halfspace(np.array([-1, 0, 0, 0]), -pi/2))
+    #     dom_state.add_halfspace(Halfspace(np.array([+1, 0, 0, 0]), -pi/2))
+    #     dom_state.add_halfspace(Halfspace(np.array([0, -1, 0, 0]), -1))
+    #     dom_state.add_halfspace(Halfspace(np.array([0, +1, 0, 0]), -1))
+    #     dom_state.add_halfspace(Halfspace(np.array([0, 0, -1, 0]), -1))
+    #     dom_state.add_halfspace(Halfspace(np.array([0, 0, +1, 0]), -1))
+    #     dom_state.add_halfspace(Halfspace(np.array([0, 0, 0, -1]), -1))
+    #     dom_state.add_halfspace(Halfspace(np.array([0, 0, 0, +1]), -1))
+    #     dom_input = Polyhedron(2)
+    #     dom_input.add_halfspace(Halfspace(np.array([-1, 0]), +0.9))
+    #     dom_input.add_halfspace(Halfspace(np.array([+1, 0]), -1.1))
+    #     dom_input.add_halfspace(Halfspace(np.array([0, -1]), -2))
+    #     dom_input.add_halfspace(Halfspace(np.array([0, +1]), -2))
+    #     system = System(
+    #         syms_state, syms_input, exprs_field, dom_state, dom_input
+    #     )
+
+    #     lear = Learner(system, exprs_term)
+    #     lear.iter_max = 10
+
+    #     exprs_uopt = np.array([1, -2*x1/pi - x4])
+    #     demo_func = lambda states : \
+    #         np.array([
+    #             evalf_expr(expr_uopt, syms_state, states)
+    #             for expr_uopt in exprs_uopt
+    #         ])
+
+    #     rmin = 0.1
+
+    #     self.assertRaises(
+    #         LearnerError,
+    #         lear.learn_CLF,
+    #         rmin, demo_func, 1e-2,
+    #     )

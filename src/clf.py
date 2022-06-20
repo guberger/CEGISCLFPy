@@ -88,21 +88,22 @@ class Generator:
         r = model.addVar(lb=-float('inf'), ub=self.rmax, name='r')
 
         for wit in self.witnesses_pos:
-            a = np.array([valterm_V for valterm_V in wit.vals_V])
+            a = np.array([val_V for val_V in wit.vals_V])
             nstates = wit.nstates
-            model.addConstr(np.dot(a, coeffs) >= nstates*self.epsilon)
+            if self.epsilon is None:
+                model.addConstr(np.dot(a, coeffs) >= nstates*r)
+            else:
+                model.addConstr(np.dot(a, coeffs) >= nstates*self.epsilon)
 
         for wit in self.witnesses_lie:
             nstates = wit.nstates
             con = model.addVars(self.systemp.ninp)
             for i in range(self.systemp.ninp):
-                a = np.array([
-                    valterm_DVGs[i] for valterm_DVGs in wit.vals_DVGs
-                ])
-                z_ = model.addVar()
+                a = np.array([val_DVGs[i] for val_DVGs in wit.vals_DVGs])
+                z_ = model.addVar(lb=-float('inf'), ub=float('inf'))
                 model.addConstr(z_ == np.dot(a, coeffs))
                 model.addConstr(con[i] == abs_(z_))
-            a = np.array([valterm_DVF for valterm_DVF in wit.vals_DVF])
+            a = np.array([val_DVF for val_DVF in wit.vals_DVF])
             model.addConstr(np.dot(a, coeffs) - con.sum() + nstates*r <= 0)
 
         model.setObjective(r, GRB.MAXIMIZE)
@@ -236,95 +237,83 @@ class Verifier:
 
 ## Learner
 
-# class System:
-#     def __init__(self, syms, expr_F, expr_Gs) -> None:
-#         self.syms = syms
-#         self.expr_F = expr_F
-#         self.expr_Gs = expr_Gs
+class System:
+    def __init__(self, expr_F, expr_Gs) -> None:
+        self.F = expr_F
+        self.Gs = expr_Gs
 
-# class Template:
-#     def __init__(self, exprterms_V) -> None:
-#         self.exprterms_V = exprterms_V
+class Template:
+    def __init__(self, exprs_V) -> None:
+        self.terms = exprs_V
 
-# class Domain:
-#     def __init__(self, lbs_out, ubs_out, lbs_in, ubs_in) -> None:
-#         self.lbs_out = lbs_out
-#         self.ubs_out = ubs_out
-#         self.lbs_in = lbs_in
-#         self.ubs_in = ubs_in
+def _make_systemplate(syms, sys, temp):
+    terms_DV = [diff_expr(expr_V, syms) for expr_V in temp.terms]
+    terms_DVF = [np.dot(sys.F, term_DV) for term_DV in terms_DV]
+    terms_DVGs = [
+        [np.dot(expr_G, term_DV) for expr_G in sys.Gs]
+        for term_DV in terms_DV
+    ]
+    return SysTemplate([
+        SysTerm(*exprs_systerm)
+        for exprs_systerm in zip(temp.terms, terms_DVF, terms_DVGs)
+    ])
 
-# def _make_exprterms(system, exprterms_V)
 
-# class LearnerError(Exception):
-#     def __init__(self, *args: object) -> None:
-#         super().__init__(*args)    
+class LearnerError(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)    
 
-# class Learner:
-#     def __init__(self, system, template, domain, tol_pos, tol_lie) -> None:
-#         self.system = system
-#         self.ninp = 
-#         self.template = template
-#         self.domain = domain
-#         self.iter_max = 1_000
+class Learner:
+    def __init__(
+            self, syms, sys, temp, domain, epsilon, tol_rad, tol_pos, tol_lie
+        ) -> None:
+        assert len(syms) == domain.nvar
+        self.syms = syms
+        self.sys = sys
+        self.systemp = _make_systemplate(syms, sys, temp)
+        self.domain = domain
+        self.epsilon = epsilon
+        self.tol_rad = tol_rad
+        self.tol_pos = tol_pos
+        self.tol_lie = tol_lie
+        self.iter_max = 1_000
 
-#     def learn_CLF(self, rmin, demo_func, eps):
-#         system = self.system
-#         syms_state = system.syms_state
-#         syms_input = system.syms_input
-#         expr_vals = self.exprs_term
-#         exprs_dirs = [
-#             diff_expr(expr_val, syms_state)
-#             for expr_val in expr_vals
-#         ]
-#         gen = Generator(syms_state, expr_vals, exprs_dirs)
+    def learn_CLF(self):
+        gen = Generator(self.syms, self.systemp, self.epsilon)
+        verif = Verifier(
+            self.syms, self.domain, self.systemp, self.tol_pos, self.tol_lie
+        )
+        iter = 0
 
-#         iter = 0
+        while True:
+            iter = iter + 1
+            if iter > self.iter_max:
+                raise LearnerError('Max iter excedeed: ' + str(iter))
 
-#         while True:
-#             iter = iter + 1
-#             if iter > self.iter_max:
-#                 raise LearnerError('Max iter excedeed: ' + str(iter))
+            coeffs, r = gen.compute_coeffs(output_flag=False)
+            print('\nIter %5d:\n%s\n%s' % (iter, coeffs, r))
 
-#             coeffs, r = gen.compute_coeffs(output_flag=False)
-#             print('\nIter %5d:\n%s\n%s' % (iter, coeffs, r))
+            if r < self.tol_rad:
+                raise LearnerError('Radius too small: ' + str(r))
 
-#             if r < eps:
-#                 raise LearnerError('Radius too small: ' + str(r))
+            res = True
 
-#             Vexpr = np.dot(expr_vals, coeffs)
-#             dVexprs = diff_expr(Vexpr, syms_state)
-#             res = True
-
-#             print('Verify pos...', end='', flush=True)
-#             verif = VerifierSimple(
-#                 syms_state, system.dom_state, rmin
-#             )
-#             res, states = verif.check_expr(Vexpr)
-#             if not res:
-#                 print(' CE found: %s' % states)
-#                 gen.add_constraint_pos(states)
-#                 continue
-#             else:
-#                 print(' No CE found')
+            print('Verify pos...', end='', flush=True)
+            res, states = verif.check_pos(coeffs)
+            if not res:
+                print(' CE found: %s' % states)
+                gen.add_witness_pos(states)
+                continue
+            else:
+                print(' No CE found')
             
-#             print('Verify lie...', end='', flush=True)
-#             verif = VerifierParam(
-#                 syms_state, system.dom_state, rmin,
-#                 syms_input, system.dom_input
-#             )
-#             dVfexpr = -np.dot(dVexprs, system.exprs_field)
-#             res, states = verif.check_expr(dVfexpr)
-#             if not res:
-#                 print(' CE found: %s' % states)
-#                 inputs = demo_func(states)
-#                 syms = np.concatenate((syms_state, syms_input))
-#                 vars = np.concatenate((states, inputs))
-#                 derivs = np.array([
-#                     evalf_expr(expr_field, syms, vars)
-#                     for expr_field in system.exprs_field
-#                 ])                        
-#                 gen.add_constraint_lie(states, derivs)
-#             else:
-#                 print(' No CE found')
-#                 print('Valid CLF: terminated')
-#                 return coeffs
+            print('Verify lie...', end='', flush=True)
+            res, states = verif.check_lie(coeffs)
+            if not res:
+                print(' CE found: %s' % states)             
+                gen.add_witness_lie(states)
+                continue
+
+            print(' No CE found')
+            print('Valid CLF: terminated')
+            return coeffs
