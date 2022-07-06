@@ -90,7 +90,7 @@ class TestLearner(unittest.TestCase):
     def __init__(self, methodName: str = ...) -> None:
         super().__init__(methodName)
 
-    def test_small(self):
+    def _test_small(self):
         x, y = syms = np.array(sp.symbols('x y'))
         sys = System(
             expr_F=np.array([-x, 2*x/pi]),
@@ -117,7 +117,7 @@ class TestLearner(unittest.TestCase):
 
         lear.learn_CLF()
 
-    def test_medium(self):
+    def _test_medium(self):
         x1, x2, x3, x4 = syms = np.array(sp.symbols('x1 x2 x3 x4'))
         sys = System(
             expr_F=np.array([-x1, -x2, -x3, 2*x1/pi]),
@@ -155,5 +155,43 @@ class TestLearner(unittest.TestCase):
         res, states = verif.check_lie(coeffs)
         print(res)
         print(states)
+
+        lear.learn_CLF()
+
+    def test_ackermann(self):
+        x1, x2, x3, x4 = syms = np.array(sp.symbols('x1 x2 x3 x4'))
+        sys = System(
+            expr_F=np.array([
+                x3*(1 - (x4**2)/2),
+                x3*(x4 - (x4**3)/6),
+                sp.sympify(0),
+                sp.sympify(0)
+            ]),
+            expr_Gs=[
+                np.array([
+                    sp.sympify(0), sp.sympify(0), sp.sympify(1), sp.sympify(0)
+                ]),
+                np.array([
+                    sp.sympify(0), sp.sympify(0), sp.sympify(0), x3/0.33
+                ])
+            ]
+        )
+        temp = Template([
+            x1*x3, x2*x3,
+            x1**2, x2**2, x3**2, x4**2]) # works not with one extra xi*xj...
+        domain = Domain(
+            lbs_out=np.array([-1, -1, -1, -pi/4]),
+            ubs_out=np.array([-1, 1, 1, pi/4]),
+            lbs_in=np.array([-0.2, -0.2, -0.2, -0.2*pi/4]),
+            ubs_in=np.array([0.2, 0.2, 0.2, 0.2*pi/4])
+        )
+        epsilon = None
+        tol_rad = 1e-5
+        tol_pos = 1e-4
+        tol_lie = -0.001
+
+        lear = Learner(
+            syms, sys, temp, domain, epsilon, tol_rad, tol_pos, tol_lie
+        )
 
         lear.learn_CLF()
